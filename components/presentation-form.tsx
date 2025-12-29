@@ -22,8 +22,7 @@ export function PresentationForm() {
   const [visualStyle, setVisualStyle] = useState("")
   const [transcript, setTranscript] = useState("")
   const [isProcessing, setIsProcessing] = useState(false)
-  const [pdfHtml, setPdfHtml] = useState<string | null>(null)
-  const [savedPrompt, setSavedPrompt] = useState(false)
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null)  const [savedPrompt, setSavedPrompt] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const [tasks, setTasks] = useState<TaskStatus[]>([
@@ -182,8 +181,7 @@ export function PresentationForm() {
 
       updateTaskStatus("pdf", "completed")
     } catch (error) {
-      console.error("Error:", error)
-      // Marcar tarea actual como error
+      setPdfUrl(pdfData.pdfUrl)      // Marcar tarea actual como error
       setTasks((prev) => prev.map((task) => (task.status === "in-progress" ? { ...task, status: "error" } : task)))
     } finally {
       setIsProcessing(false)
@@ -194,21 +192,6 @@ export function PresentationForm() {
     if (!pdfHtml) return
 
     // Crear una nueva ventana con el contenido HTML
-    const printWindow = window.open("", "_blank")
-    if (printWindow) {
-      printWindow.document.write(pdfHtml)
-      printWindow.document.close()
-
-      // Esperar a que las imágenes carguen y luego imprimir
-      setTimeout(() => {
-        printWindow.print()
-      }, 2000)
-    }
-  }
-
-  return (
-    <div className="space-y-6">
-      {/* System Prompt Section */}
       <Card className="border-2 border-accent/20 bg-card">
         <CardContent className="pt-6 space-y-4">
           <div className="flex items-center justify-between">
@@ -358,10 +341,13 @@ export function PresentationForm() {
           )}
         </Button>
 
-        {pdfHtml && (
-          <Button
-            onClick={downloadPdf}
-            className="w-full h-14 text-lg font-bold bg-foreground text-background hover:bg-foreground/90"
+        {pdfUrl && (      </div>
+    </div>
+          <a
+            href={pdfUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center justify-center w-full h-14 text-lg font-bold bg-foreground text-background hover:bg-foreground/90 rounded-xl"
           >
             <svg className="w-6 h-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path
@@ -371,10 +357,8 @@ export function PresentationForm() {
                 d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
               />
             </svg>
-            Descargar Presentación
-          </Button>
+            Descargar PDF
+          </a>
         )}
-      </div>
-    </div>
   )
 }
