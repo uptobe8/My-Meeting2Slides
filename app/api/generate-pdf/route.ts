@@ -1,131 +1,79 @@
-import { type NextRequest, NextResponse } from "next/server"
+import { NextResponse } from "next/server"
+import { PDFDocument } from "pdf-lib"
 import { createClient } from "@/lib/supabase/server"
 
-export async function POST(request: NextRequest) {
+async function fetchBytes(url: string): Promise<Uint8Array> {
+  if (url.startsWith("data:image")) {
+    const b64 = url.split(",")[1] ?? ""
+    return Uint8Array.from(Buffer.from(b64, "base64"))
+  }
+  const res = await fetch(url)
+  if (!res.ok) throw new Error(`No se pudo descargar imagen: ${res.status}`)
+  const buf = await res.arrayBuffer()
+  return new Uint8Array(buf)
+}
+
+export async function POST(request: Request) {
   try {
     const { presentationId } = await request.json()
+    if (!presentationId) {
+      return NextResponse.json({ error: "presentationId requerido" }, { status: 400 })
+    }
 
     const supabase = await createClient()
 
-    // Obtener las diapositivas con sus imágenes
     const { data: slides, error: slidesError } = await supabase
       .from("slides")
       .select("*")
       .eq("presentation_id", presentationId)
       .order("slide_number", { ascending: true })
 
-    if (slidesError || !slides || slides.length === 0) {
-      return NextResponse.json({ error: "No se encontraron diapositivas" }, { status: 404 })
+    if (slidesError || !slides?.length) {
+      return NextResponse.json({ error: "No hay diapositivas para generar PDF" }, { status: 500 })
     }
 
-    // Crear HTML para el PDF
-    const htmlContent = `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <style>
-    @page {
-      size: 1920px 1080px;
-      margin: 0;
-    }
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-    body {
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    }
-    .slide {
-      width: 1920px;
-      height: 1080px;
-      page-break-after: always;
-      position: relative;
-      background: #000;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-    .slide:last-child {
-      page-break-after: avoid;
-    }
-    .slide img {
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-    }
-    .slide-fallback {
-      width: 100%;
-      height: 100%;
-      background: linear-gradient(135deg, #000 0%, #1a1a1a 100%);
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      padding: 80px;
-      text-align: center;
-    }
-    .slide-fallback h1 {
-      color: #d2dd00;
-      font-size: 64px;
-      margin-bottom: 40px;
-      font-weight: 700;
-    }
-    .slide-fallback p {
-      color: #fff;
-      font-size: 32px;
-      line-height: 1.6;
-      max-width: 1400px;
-    }
-    .slide-number {
-      position: absolute;
-      bottom: 30px;
-      right: 40px;
-      color: #d2dd00;
-      font-size: 24px;
-      font-weight: 600;
-    }
-  </style>
-</head>
-<body>
-  ${slides
-    .map(
-      (slide) => `
-    <div class="slide">
-      ${
-        slide.image_url && !slide.image_url.includes("placeholder")
-          ? `<img src="${slide.image_url}" alt="${slide.title || "Slide"}" />`
-          : `<div class="slide-fallback">
-          <h1>${slide.title || `Diapositiva ${slide.slide_number}`}</h1>
-          <p>${slide.description || ""}</p>
-        </div>`
+    const PAGE_W = 1280
+    const PAGE_H = 720
+
+    const pdf = await PDFDocument.create()
+
+    for (const slide of slides) {
+      const page = pdf.addPage([PAGE_W, PAGE_H])
+
+      if (slide.image_url) {
+        const imgBytes = await fetchBytes(slide.image_url)
+        let embedded
+        try {
+          embedded = await pdf.embedPng(imgBytes)
+        } catch {
+          embedded = await pdf.embedJpg(imgBytes)
+        }
+        page.drawImage(embedded, { x: 0, y: 0, width: PAGE_W, height: PAGE_H })
       }
-      <span class="slide-number">${slide.slide_number}</span>
-    </div>
-  `,
-    )
-    .join("")}
-</body>
-</html>
-`
+    }
 
-    // Actualizar estado
+    const pdfBytes = await pdf.save()
+
+    const pdfPath = `presentation_${presentationId}/deck.pdf`
+    const { error: uploadError } = await supabase.storage.from("presentations").upload(pdfPath, pdfBytes, {
+      contentType: "application/pdf",
+      upsert: true,
+    })
+
+    if (uploadError) {
+      return NextResponse.json({ error: "Error subiendo PDF a Storage" }, { status: 500 })
+    }
+
+    const { data: urlData } = supabase.storage.from("presentations").getPublicUrl(pdfPath)
+    const pdfUrl = urlData.publicUrl
+
     await supabase
       .from("presentations")
-      .update({
-        status: "completed",
-        pdf_url: "generated",
-      })
+      .update({ pdf_url: pdfUrl, status: "completed" })
       .eq("id", presentationId)
 
-    return NextResponse.json({
-      success: true,
-      html: htmlContent,
-      slideCount: slides.length,
-    })
-  } catch (error) {
-    console.error("Error generating PDF:", error)
-    return NextResponse.json({ error: "Error interno del servidor" }, { status: 500 })
+    return NextResponse.json({ success: true, pdfUrl })
+  } catch (e) {
+    return NextResponse.json({ error: (e as Error).message ?? "Error interno" }, { status: 500 })
   }
 }
