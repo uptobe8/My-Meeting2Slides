@@ -4,9 +4,11 @@ const nextConfig = {
   basePath: '/My-Meeting2Slides',
   typescript: {
     ignoreBuildErrors: true,
-  },
-  images: {
+
+    images{:     
     unoptimized: true,
+  },
+  },
   },
 }
 
