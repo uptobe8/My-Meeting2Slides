@@ -38,8 +38,7 @@ ${transcript}
 `
 
     const { text: outlineText } = await generateText({
-      model: "anthropic/claude-sonnet-4-20250514",
-      prompt: outlinePrompt,
+model: "openai/gpt-4o",      prompt: outlinePrompt,
     })
 
     // Parsear el JSON del outline
