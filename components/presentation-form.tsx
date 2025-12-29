@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState, useRef } from "react"
+import { useMemo, useRef, useState } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -16,75 +16,73 @@ interface TaskStatus {
   status: "pending" | "in-progress" | "completed" | "error"
 }
 
+const INITIAL_TASKS: TaskStatus[] = [
+  { id: "analyze", label: "Procesando transcripción con IA", status: "pending" },
+  { id: "outline", label: "Creando outline de presentación", status: "pending" },
+  { id: "images", label: "Generando imágenes", status: "pending" },
+  { id: "pdf", label: "Compilando PDF", status: "pending" },
+]
+
 export function PresentationForm() {
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
   const [systemPrompt, setSystemPrompt] = useState("")
   const [contentOrientation, setContentOrientation] = useState("")
   const [visualStyle, setVisualStyle] = useState("")
   const [transcript, setTranscript] = useState("")
-  const [isProcessing, setIsProcessing] = useState(false)
-  const [pdfUrl, setPdfUrl] = useState<string | null>(null)  const [savedPrompt, setSavedPrompt] = useState(false)
-  const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const [tasks, setTasks] = useState<TaskStatus[]>([
-    { id: "analyze", label: "Analizando transcripción con IA", status: "pending" },
-    { id: "outline", label: "Creando estructura de diapositivas", status: "pending" },
-    { id: "save", label: "Guardando en base de datos", status: "pending" },
-    { id: "images", label: "Generando imágenes de diapositivas", status: "pending" },
-    { id: "pdf", label: "Compilando presentación final", status: "pending" },
-  ])
+  const [tasks, setTasks] = useState<TaskStatus[]>(INITIAL_TASKS)
+  const [isProcessing, setIsProcessing] = useState(false)
+
+  const [savedPrompt, setSavedPrompt] = useState(false)
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null)
+
+  const canSubmit = useMemo(() => transcript.trim().length > 0 && !isProcessing, [transcript, isProcessing])
 
   const updateTaskStatus = (taskId: string, status: TaskStatus["status"]) => {
-    setTasks((prev) => prev.map((task) => (task.id === taskId ? { ...task, status } : task)))
+    setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, status } : t)))
   }
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
+  const resetRunState = () => {
+    setTasks(INITIAL_TASKS)
+    setPdfUrl(null)
+    setSavedPrompt(false)
+  }
 
+  const handleFileUpload = async (file: File) => {
     const reader = new FileReader()
-    reader.onload = (event) => {
-      const content = event.target?.result as string
-      setTranscript(content)
+    reader.onload = () => {
+      const text = String(reader.result ?? "")
+      setTranscript(text)
     }
+    reader.onerror = () => alert("Error leyendo archivo")
 
-    if (file.name.endsWith(".txt")) {
-      reader.readAsText(file)
-    } else if (file.name.endsWith(".docx") || file.name.endsWith(".doc")) {
-      // Para archivos Word, intentar leer como texto
-      reader.readAsText(file)
-    } else {
-      reader.readAsText(file)
-    }
+    // Para este MVP: leer todo como texto
+    reader.readAsText(file)
   }
 
   const saveSystemPrompt = async () => {
-    const supabase = createClient()
-
-    // Primero eliminar prompts anteriores
-    await supabase.from("system_prompts").delete().neq("id", "00000000-0000-0000-0000-000000000000")
-
-    // Guardar el nuevo prompt
-    const { error } = await supabase.from("system_prompts").insert({
-      prompt: systemPrompt,
-    })
-
-    if (!error) {
+    try {
+      const supabase = createClient()
+      // MVP: guarda uno solo (borra anteriores)
+      await supabase.from("system_prompts").delete().neq("id", "00000000-0000-0000-0000-000000000000")
+      const { error } = await supabase.from("system_prompts").insert({ prompt: systemPrompt })
+      if (error) throw error
       setSavedPrompt(true)
-      setTimeout(() => setSavedPrompt(false), 2000)
+      setTimeout(() => setSavedPrompt(false), 1500)
+    } catch {
+      alert("No se pudo guardar el prompt")
     }
   }
 
   const loadSystemPrompt = async () => {
-    const supabase = createClient()
-    const { data } = await supabase
-      .from("system_prompts")
-      .select("prompt")
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .single()
-
-    if (data) {
-      setSystemPrompt(data.prompt)
+    try {
+      const supabase = createClient()
+      const { data, error } = await supabase.from("system_prompts").select("prompt").order("created_at", { ascending: false }).limit(1)
+      if (error) throw error
+      if (data?.[0]?.prompt) setSystemPrompt(data[0].prompt)
+    } catch {
+      alert("No se pudo cargar el prompt guardado")
     }
   }
 
@@ -94,16 +92,14 @@ export function PresentationForm() {
       return
     }
 
+    // Estado inicial de run (IMPORTANTE para que el checklist se vea SIEMPRE)
+    resetRunState()
     setIsProcessing(true)
-    setPdfHtml(null)
-
-    // Reset tasks
-    setTasks((prev) => prev.map((task) => ({ ...task, status: "pending" })))
 
     try {
       const supabase = createClient()
 
-      // Crear registro de presentación
+      // 1) Crear presentación en BD (necesitamos presentationId)
       updateTaskStatus("analyze", "in-progress")
 
       const { data: presentation, error: createError } = await supabase
@@ -118,11 +114,11 @@ export function PresentationForm() {
         .select()
         .single()
 
-      if (createError || !presentation) {
+      if (createError || !presentation?.id) {
         throw new Error("Error al crear presentación")
       }
 
-      // Paso 1: Procesar transcript y crear outline
+      // 2) Procesar transcript -> outline + slides
       const processResponse = await fetch("/api/process-transcript", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -136,14 +132,14 @@ export function PresentationForm() {
       })
 
       if (!processResponse.ok) {
-        throw new Error("Error al procesar transcripción")
+        const err = await processResponse.text().catch(() => "")
+        throw new Error(`Error al procesar transcripción: ${err}`)
       }
 
       updateTaskStatus("analyze", "completed")
       updateTaskStatus("outline", "completed")
-      updateTaskStatus("save", "completed")
 
-      // Paso 2: Generar imágenes
+      // 3) Generar imágenes
       updateTaskStatus("images", "in-progress")
 
       const imagesResponse = await fetch("/api/generate-images", {
@@ -156,42 +152,42 @@ export function PresentationForm() {
       })
 
       if (!imagesResponse.ok) {
-        throw new Error("Error al generar imágenes")
+        const err = await imagesResponse.text().catch(() => "")
+        throw new Error(`Error al generar imágenes: ${err}`)
       }
 
       updateTaskStatus("images", "completed")
 
-      // Paso 3: Generar PDF
+      // 4) Generar PDF REAL (server-side) -> devuelve pdfUrl
       updateTaskStatus("pdf", "in-progress")
 
       const pdfResponse = await fetch("/api/generate-pdf", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          presentationId: presentation.id,
-        }),
+        body: JSON.stringify({ presentationId: presentation.id }),
       })
 
       if (!pdfResponse.ok) {
-        throw new Error("Error al generar PDF")
+        const err = await pdfResponse.text().catch(() => "")
+        throw new Error(`Error al generar PDF: ${err}`)
       }
 
-      const pdfData = await pdfResponse.json()
-      setPdfHtml(pdfData.html)
+      const pdfData = (await pdfResponse.json()) as { pdfUrl?: string }
+      if (!pdfData?.pdfUrl) throw new Error("El backend no devolvió pdfUrl")
 
+      setPdfUrl(pdfData.pdfUrl)
       updateTaskStatus("pdf", "completed")
-    } catch (error) {
-      setPdfUrl(pdfData.pdfUrl)      // Marcar tarea actual como error
-      setTasks((prev) => prev.map((task) => (task.status === "in-progress" ? { ...task, status: "error" } : task)))
+    } catch (e) {
+      // Marca la tarea en curso como error (si la hay)
+      setTasks((prev) => prev.map((t) => (t.status === "in-progress" ? { ...t, status: "error" } : t)))
+      alert((e as Error)?.message ?? "Error inesperado")
     } finally {
       setIsProcessing(false)
     }
   }
 
-  const downloadPdf = () => {
-    if (!pdfHtml) return
-
-    // Crear una nueva ventana con el contenido HTML
+  return (
+    <div className="space-y-6">
       <Card className="border-2 border-accent/20 bg-card">
         <CardContent className="pt-6 space-y-4">
           <div className="flex items-center justify-between">
@@ -212,9 +208,10 @@ export function PresentationForm() {
               </Button>
             </div>
           </div>
+
           <Textarea
             id="system-prompt"
-            placeholder="Define cómo quieres que la IA procese tus transcripciones. Ej: Creas presentaciones a partir de transcripciones, siempre limpias, con datos y en estilo elegante..."
+            placeholder="Define cómo quieres que la IA procese tus transcripciones, siempre limpias, con datos y en estilo elegante..."
             value={systemPrompt}
             onChange={(e) => setSystemPrompt(e.target.value)}
             className="min-h-[100px] bg-background border-border"
@@ -222,7 +219,6 @@ export function PresentationForm() {
         </CardContent>
       </Card>
 
-      {/* Content Orientation */}
       <Card className="border-2 border-accent/20 bg-card">
         <CardContent className="pt-6 space-y-4">
           <Label htmlFor="content-orientation" className="text-lg font-semibold text-foreground">
@@ -230,7 +226,7 @@ export function PresentationForm() {
           </Label>
           <Textarea
             id="content-orientation"
-            placeholder="Describe la orientación específica de esta presentación. Ej: Es una propuesta comercial para un cliente, enfatiza su problema y nuestra solución con detalle..."
+            placeholder="Describe la orientación específica de esta presentación... Ej: Es una propuesta comercial para un cliente, enfatiza su problema y nuestra solución con detalle..."
             value={contentOrientation}
             onChange={(e) => setContentOrientation(e.target.value)}
             className="min-h-[80px] bg-background border-border"
@@ -238,7 +234,6 @@ export function PresentationForm() {
         </CardContent>
       </Card>
 
-      {/* Visual Style */}
       <Card className="border-2 border-accent/20 bg-card">
         <CardContent className="pt-6 space-y-4">
           <Label htmlFor="visual-style" className="text-lg font-semibold text-foreground">
@@ -246,7 +241,7 @@ export function PresentationForm() {
           </Label>
           <Textarea
             id="visual-style"
-            placeholder="Describe el estilo gráfico deseado. Ej: Estilo infográfico editorial con gráficos creativos, colores negro, blanco y amarillo lima como acento..."
+            placeholder="Describe el estilo gráfico deseado... Ej: Minimalista, con bastantes gráficos, colores blanco y naranja como refuerzo..."
             value={visualStyle}
             onChange={(e) => setVisualStyle(e.target.value)}
             className="min-h-[80px] bg-background border-border"
@@ -254,111 +249,63 @@ export function PresentationForm() {
         </CardContent>
       </Card>
 
-      {/* Transcript Upload */}
       <Card className="border-2 border-accent/20 bg-card">
         <CardContent className="pt-6 space-y-4">
-          <Label className="text-lg font-semibold text-foreground">Transcripción de la Reunión</Label>
+          <Label className="text-lg font-semibold text-foreground">Transcripción</Label>
 
-          <div className="flex flex-col gap-4">
-            <div
-              className="border-2 border-dashed border-accent/40 rounded-lg p-8 text-center cursor-pointer hover:border-accent transition-colors bg-background"
+          <div className="flex flex-col gap-3">
+            <input
+              ref={fileInputRef}
+              type="file"
+              className="hidden"
+              accept=".txt,.doc,.docx,.pdf"
+              onChange={(e) => {
+                const file = e.target.files?.[0]
+                if (file) void handleFileUpload(file)
+              }}
+            />
+
+            <Button
+              type="button"
+              variant="outline"
               onClick={() => fileInputRef.current?.click()}
+              className="bg-transparent justify-start"
             >
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".txt,.doc,.docx,.pdf"
-                onChange={handleFileUpload}
-                className="hidden"
-              />
-              <div className="space-y-2">
-                <div className="w-16 h-16 mx-auto bg-accent/20 rounded-full flex items-center justify-center">
-                  <svg className="w-8 h-8 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"
-                    />
-                  </svg>
-                </div>
-                <p className="text-muted-foreground">Haz clic para subir tu archivo</p>
-                <p className="text-xs text-muted-foreground">TXT, DOC, DOCX o PDF</p>
-              </div>
-            </div>
-
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center">
-                <span className="w-full border-t border-border" />
-              </div>
-              <div className="relative flex justify-center text-xs uppercase">
-                <span className="bg-card px-2 text-muted-foreground">o pega el texto</span>
-              </div>
-            </div>
+              Subir archivo (TXT/DOC/DOCX/PDF)
+            </Button>
 
             <Textarea
               placeholder="Pega aquí el contenido de tu transcripción..."
               value={transcript}
               onChange={(e) => setTranscript(e.target.value)}
-              className="min-h-[150px] bg-background border-border"
+              className="min-h-[180px] bg-background border-border"
             />
           </div>
         </CardContent>
       </Card>
 
-      {/* Progress Checklist */}
-      {isProcessing && <ProgressChecklist tasks={tasks} />}
-
-      {/* Action Buttons */}
-      <div className="flex flex-col gap-4">
+      <div className="space-y-4">
         <Button
           onClick={handleCreatePresentation}
-          disabled={isProcessing || !transcript.trim()}
-          className="w-full h-14 text-lg font-bold bg-accent text-accent-foreground hover:bg-accent/90 disabled:opacity-50"
+          disabled={!canSubmit}
+          className="w-full bg-accent text-accent-foreground hover:bg-accent/90"
         >
-          {isProcessing ? (
-            <span className="flex items-center gap-2">
-              <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
-                <circle
-                  className="opacity-25"
-                  cx="12"
-                  cy="12"
-                  r="10"
-                  stroke="currentColor"
-                  strokeWidth="4"
-                  fill="none"
-                />
-                <path
-                  className="opacity-75"
-                  fill="currentColor"
-                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                />
-              </svg>
-              Creando presentación...
-            </span>
-          ) : (
-            "Crear Presentación"
-          )}
+          {isProcessing ? "Creando presentación..." : "Crear Presentación"}
         </Button>
 
-        {pdfUrl && (      </div>
-    </div>
+        <ProgressChecklist tasks={tasks} />
+
+        {pdfUrl && (
           <a
             href={pdfUrl}
             target="_blank"
             rel="noreferrer"
-            className="inline-flex items-center justify-center w-full h-14 text-lg font-bold bg-foreground text-background hover:bg-foreground/90 rounded-xl"
+            className="block w-full rounded-md bg-foreground px-4 py-3 text-center text-background font-semibold hover:opacity-90"
           >
-            <svg className="w-6 h-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
-              />
-            </svg>
             Descargar PDF
           </a>
         )}
+      </div>
+    </div>
   )
 }
