@@ -38,8 +38,6 @@ Transcripción:
 ${transcript}
 `
 
-   apiKey: process.env.OPENROUTER_API_KEY || "",
-    })
 
     const { text: outlineText } = await generateText({
       model: openrouter("openai/gpt-4o"),      prompt: outlinePrompt,
