@@ -76,7 +76,6 @@ ${transcript}
             temperature: 0.3,
           },
         }));
-      }
 
     if (!geminiRes.ok) {
       const errText = await geminiRes.text();
