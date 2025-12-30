@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server"
-import { createClient } from "@/lib/supabase/server"
 
 function needEnv(name: string) {
   const v = process.env[name]
@@ -10,11 +9,12 @@ function needEnv(name: string) {
 export async function POST(req: Request) {
   try {
     const { presentationId, systemPrompt, contentOrientation, visualStyle, transcript } = await req.json()
+
     if (!presentationId || !transcript) {
       return NextResponse.json({ error: "presentationId y transcript requeridos" }, { status: 400 })
     }
 
-    const supabase = await createClient()
+    const apiKey = needEnv('GEMINI_API_KEY')
 
     const prompt = `
 DEVUELVE SOLO JSON VÁLIDO. SIN MARKDOWN.
@@ -35,52 +35,62 @@ FORMATO:
 PROMPT SISTEMA:
 ${systemPrompt}
 
-ORIENTACIÓN:
-${contentOrientation}
-
-ESTILO VISUAL:
-${visualStyle}
+ORIENTACIÓN: ${contentOrientation || 'técnico'}
+ESTILO VISUAL: ${visualStyle || 'profesional'}
 
 TRANSCRIPCIÓN:
 ${transcript}
-`.trim()
 
-    const apiKey = needEnv("GEMINI_API_KEY")
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${apiKey}`
+Genera una presentación de 8-10 slides.
+`
 
-    const r = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+    // Use Gemini REST API directly (v1 stable API)
+    const response = await fetch('https://generativelanguage.googleapis.com/v1/models/gemini-1.5-pro:generateContent?key=' + apiKey, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
       body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.4, maxOutputTokens: 8192 },
-      }),
+        contents: [{
+          parts: [{
+            text: prompt
+          }]
+        }],
+        generationConfig: {
+          temperature: 0.7,
+          maxOutputTokens: 4096,
+        }
+      })
     })
 
-    if (!r.ok) throw new Error(await r.text())
+    if (!response.ok) {
+      const errorText = await response.text()
+      console.error('Gemini API Error:', errorText)
+      throw new Error(`Gemini API error: ${response.status} - ${errorText}`)
+    }
 
-    const data: any = await r.json()
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text
-    if (!text) throw new Error("Gemini no devolvió texto")
+    const data = await response.json()
+    const generatedText = data.candidates[0].content.parts[0].text
 
-    const outline = JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] || "")
+    // Clean JSON response
+    let cleanText = generatedText.trim()
+    cleanText = cleanText.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '')
+    
+    const presentation = JSON.parse(cleanText)
 
-    await supabase.from("presentations").update({ outline, status: "outline_created" }).eq("id", presentationId)
-    await supabase.from("slides").delete().eq("presentation_id", presentationId)
+    console.log('Presentation generated:', presentation)
 
-    const slides = outline.slides.map((s: any) => ({
-      presentation_id: presentationId,
-      slide_number: s.slideNumber,
-      title: s.title,
-      description: s.description,
-      image_prompt: s.imagePrompt,
-    }))
+    return NextResponse.json({
+      status: 'completed',
+      presentationId,
+      presentation
+    })
 
-    await supabase.from("slides").insert(slides)
-
-    return NextResponse.json({ success: true })
-  } catch (e: any) {
-    console.error(e)
-    return NextResponse.json({ error: e.message }, { status: 500 })
+  } catch (error: any) {
+    console.error('Error en process-transcript:', error)
+    return NextResponse.json(
+      { error: error.message || 'Error procesando transcripción' },
+      { status: 500 }
+    )
   }
 }
