@@ -1,5 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server"
+import { createOpenRouter } from "@openrouter/ai-sdk-provider"
 import { generateText } from "ai"
+import { createOpenRouter } from "@openrouter/ai-sdk-provider"
 import { createClient } from "@/lib/supabase/server"
 
 export async function POST(request: NextRequest) {
@@ -37,11 +39,14 @@ Transcripción:
 ${transcript}
 `
 
-    const { text: outlineText } = await generateText({
-model: "openai/gpt-4o",      prompt: outlinePrompt,
+    const openrouter = createOpenRouter({
+      apiKey: process.env.OPENROUTER_API_KEY || "",
     })
 
-    // Parsear el JSON del outline
+    const { text: outlineText } = await generateText({
+      model: openrouter("openai/gpt-4o"),
+      prompt: outlinePrompt,
+   // Parsear el JSON del outline
     let outline
     try {
       // Extraer JSON del texto (puede venir con markdown)
