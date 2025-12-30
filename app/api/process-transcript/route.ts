@@ -44,22 +44,24 @@ ${transcript}
 Genera una presentación de 8-10 slides.
 `
 
-    // Use Gemini REST API directly (v1 stable API)
-    const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=' + apiKey, {      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        contents: [{
-          parts: [{
-            text: prompt
-          }]
-        }],
-        generationConfig: {
-          temperature: 0.7,
-          maxOutputTokens: 4096,
-        }
+    // Use Gemini REST API directly with POST method
+    const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=' + apiKey, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          contents: [{
+            parts: [{
+              text: prompt
+            }]
+          }],
+          generationConfig: {
+            temperature: 0.7,
+            maxOutputTokens: 4096,
+          }
+        })
       })
-    })
 
     if (!response.ok) {
       const errorText = await response.text()
@@ -72,8 +74,8 @@ Genera una presentación de 8-10 slides.
 
     // Clean JSON response
     let cleanText = generatedText.trim()
-    cleanText = cleanText.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '')
-    
+    cleanText = cleanText.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '')
+
     const presentation = JSON.parse(cleanText)
 
     console.log('Presentation generated:', presentation)
@@ -86,9 +88,6 @@ Genera una presentación de 8-10 slides.
 
   } catch (error: any) {
     console.error('Error en process-transcript:', error)
-    return NextResponse.json(
-      { error: error.message || 'Error procesando transcripción' },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: error.message || 'Error procesando transcripción' }, { status: 500 })
   }
 }
