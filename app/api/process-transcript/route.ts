@@ -79,7 +79,8 @@ ${transcript}
 
     if (!geminiRes.ok) {
       const errText = await geminiRes.text();
-      throw new Error(`Gemini API error ${geminiRes.status}: ${errText}`);
+      t})
+    }); new Error(`Gemini API error ${geminiRes.status}: ${errText}`);
     }
 
     const geminiJson = await geminiRes.json();
