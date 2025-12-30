@@ -1,4 +1,3 @@
-// app/api/process-transcript/route.ts
 import { NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
 
@@ -8,35 +7,19 @@ function needEnv(name: string) {
   return v
 }
 
-function safeJsonParse(text: string) {
-  try {
-    return JSON.parse(text)
-  } catch {
-    const m = text.match(/\{[\s\S]*\}/)
-    if (!m) throw new Error("Gemini no devolvió JSON válido")
-    return JSON.parse(m[0])
-  }
-}
-
 export async function POST(req: Request) {
   try {
     const { presentationId, systemPrompt, contentOrientation, visualStyle, transcript } = await req.json()
-
-    if (!presentationId) return NextResponse.json({ error: "presentationId requerido" }, { status: 400 })
-    if (!transcript || !String(transcript).trim()) {
-      return NextResponse.json({ error: "transcript requerido" }, { status: 400 })
+    if (!presentationId || !transcript) {
+      return NextResponse.json({ error: "presentationId y transcript requeridos" }, { status: 400 })
     }
 
     const supabase = await createClient()
 
-    const sys = systemPrompt?.trim() || "Eres un experto en crear presentaciones profesionales."
-    const orientation = contentOrientation?.trim() || "Propuesta comercial"
-    const style = visualStyle?.trim() || "Minimalista, profesional, blanco y naranja, con gráficos"
-
     const prompt = `
-DEVUELVE SOLO JSON VÁLIDO. SIN MARKDOWN. SIN TEXTO EXTRA.
+DEVUELVE SOLO JSON VÁLIDO. SIN MARKDOWN.
 
-ESQUEMA:
+FORMATO:
 {
   "title": string,
   "slides": [
@@ -49,19 +32,14 @@ ESQUEMA:
   ]
 }
 
-REGLAS:
-- 8 a 14 diapositivas.
-- description: texto breve de slide, profesional.
-- imagePrompt: instrucción visual acorde al estilo; evita texto legible en la imagen.
-
 PROMPT SISTEMA:
-${sys}
+${systemPrompt}
 
 ORIENTACIÓN:
-${orientation}
+${contentOrientation}
 
 ESTILO VISUAL:
-${style}
+${visualStyle}
 
 TRANSCRIPCIÓN:
 ${transcript}
@@ -79,40 +57,30 @@ ${transcript}
       }),
     })
 
-    if (!r.ok) {
-      const t = await r.text().catch(() => "")
-      throw new Error(`Gemini error: ${r.status} ${t}`)
-    }
+    if (!r.ok) throw new Error(await r.text())
 
     const data: any = await r.json()
-    const text =
-      data?.candidates?.[0]?.content?.parts?.map((p: any) => p?.text).filter(Boolean).join("") || ""
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text
+    if (!text) throw new Error("Gemini no devolvió texto")
 
-    const outline = safeJsonParse(text)
+    const outline = JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] || "")
 
     await supabase.from("presentations").update({ outline, status: "outline_created" }).eq("id", presentationId)
-
     await supabase.from("slides").delete().eq("presentation_id", presentationId)
 
-    const slides = (outline.slides || []).map((s: any) => ({
+    const slides = outline.slides.map((s: any) => ({
       presentation_id: presentationId,
-      slide_number: Number(s.slideNumber),
-      title: String(s.title ?? ""),
-      description: String(s.description ?? ""),
-      image_prompt: String(s.imagePrompt ?? ""),
-      image_url: null,
+      slide_number: s.slideNumber,
+      title: s.title,
+      description: s.description,
+      image_prompt: s.imagePrompt,
     }))
 
-    if (!slides.length) throw new Error("Outline sin slides")
+    await supabase.from("slides").insert(slides)
 
-    const { error: insErr } = await supabase.from("slides").insert(slides)
-    if (insErr) throw new Error("Error insertando slides")
-
-    await supabase.from("presentations").update({ status: "slides_saved" }).eq("id", presentationId)
-
-    return NextResponse.json({ success: true, outline, slideCount: slides.length })
+    return NextResponse.json({ success: true })
   } catch (e: any) {
-    console.error("process-transcript error:", e)
-    return NextResponse.json({ error: e?.message || "Error procesando transcripción" }, { status: 500 })
+    console.error(e)
+    return NextResponse.json({ error: e.message }, { status: 500 })
   }
 }
