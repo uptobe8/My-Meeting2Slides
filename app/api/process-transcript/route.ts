@@ -75,7 +75,7 @@ ${transcript}
           generationConfig: {
             temperature: 0.3,
           },
-        }));
+        }));)
       }
 
     if (!geminiRes.ok) {
