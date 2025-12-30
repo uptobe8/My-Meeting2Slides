@@ -2,7 +2,6 @@ import { type NextRequest, NextResponse } from "next/server"
 import { createOpenRouter } from "@openrouter/ai-sdk-provider"
 import { generateText } from "ai"
 import { createClient } from "@/lib/supabase/server"
-import { createOpenRouter } from "@openrouter/ai-sdk-provider"
 
 export async function POST(request: NextRequest) {
   try {
