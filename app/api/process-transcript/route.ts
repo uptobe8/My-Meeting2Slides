@@ -74,11 +74,9 @@ ${transcript}
           ],
           generationConfig: {
             temperature: 0.3,
-            responseMimeType: "application/json",
           },
         }),
       }
-    );
 
     if (!geminiRes.ok) {
       const errText = await geminiRes.text();
