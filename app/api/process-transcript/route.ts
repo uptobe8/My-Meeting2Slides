@@ -6,8 +6,13 @@ import { createClient } from "@/lib/supabase/server"
 export async function POST(request: NextRequest) {
   try {
     const { presentationId, systemPrompt, contentOrientation, visualStyle, transcript } = await request.json()
-
+    
     const supabase = await createClient()
+
+    // Configurar OpenRouter provider
+    const openrouter = createOpenRouter({
+      apiKey: process.env.OPENROUTER_API_KEY || "",
+    })
 
     // Paso 1: Analizar el transcript y crear el outline
     const outlinePrompt = `
@@ -38,63 +43,48 @@ Transcripción:
 ${transcript}
 `
 
-        const openrouter = createOpenRouter({
-      apiKey: process.env.OPENROUTER_API_KEY || "",
+    const { text: outlineText } = await generateText({
+      model: openrouter("openai/gpt-4o"),
+      prompt: outlinePrompt,
     })
 
-
-    const { text: outlineText } = await generateText({
-      model: openrouter("openai/gpt-4o"),   // Parsear el JSON del outline
+    // Parsear el JSON del outline
     let outline
     try {
       // Extraer JSON del texto (puede venir con markdown)
-      const jsonMatch = outlineText.match(/\{[\s\S]*\}/)
+      const jsonMatch = outlineText.match(/\{[\s\S]+\}/)
       if (jsonMatch) {
         outline = JSON.parse(jsonMatch[0])
       } else {
         throw new Error("No se encontró JSON válido")
       }
-    } catch {
-      console.error("Error parsing outline:", outlineText)
-      return NextResponse.json({ error: "Error al parsear el outline" }, { status: 500 })
+    } catch (error) {
+      console.error("Error parsing outline JSON:", error)
+      throw new Error("Error al parsear el outline generado por la IA")
     }
 
-    // Guardar el outline en la presentación
-    const { error: updateError } = await supabase
+    // Guardar el outline en Supabase
+    const { error: outlineError } = await supabase
       .from("presentations")
-      .update({ outline, status: "outline_created" })
+      .update({ outline })
       .eq("id", presentationId)
 
-    if (updateError) {
-      console.error("Error updating presentation:", updateError)
-      return NextResponse.json({ error: "Error al guardar outline" }, { status: 500 })
+    if (outlineError) {
+      console.error("Error guardando outline:", outlineError)
+      throw outlineError
     }
 
-    // Guardar cada diapositiva en la base de datos
-    const slidesData = outline.slides.map((slide: { slideNumber: number; title: string; description: string }) => ({
-      presentation_id: presentationId,
-      slide_number: slide.slideNumber,
-      title: slide.title,
-      description: slide.description,
-    }))
-
-    const { error: slidesError } = await supabase.from("slides").insert(slidesData)
-
-    if (slidesError) {
-      console.error("Error inserting slides:", slidesError)
-      return NextResponse.json({ error: "Error al guardar diapositivas" }, { status: 500 })
-    }
-
-    // Actualizar estado
-    await supabase.from("presentations").update({ status: "slides_saved" }).eq("id", presentationId)
-
+    // Retornar el outline para continuar con la generación de imágenes
     return NextResponse.json({
       success: true,
       outline,
-      slideCount: outline.slides.length,
+      message: "Outline generado correctamente",
     })
-  } catch (error) {
-    console.error("Error processing transcript:", error)
-    return NextResponse.json({ error: "Error interno del servidor" }, { status: 500 })
+  } catch (error: any) {
+    console.error("Error en process-transcript:", error)
+    return NextResponse.json(
+      { error: error.message || "Error procesando la transcripción" },
+      { status: 500 }
+    )
   }
 }
