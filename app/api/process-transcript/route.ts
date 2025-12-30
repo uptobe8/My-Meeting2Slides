@@ -1,5 +1,4 @@
-import { type NextRequest, NextResponse } from "next/server"
-import { createOpenAI } from "@ai-sdk/openai"
+import { type NextRequest, NextResponse } from "next/serv{ groq } from "@ai-sdk/groq"
 import { generateText } from "ai"
 import { createClient } from "@/lib/supabase/server"
 
@@ -7,11 +6,7 @@ export async function POST(request: NextRequest) {
   try {
     const { presentationId, systemPrompt, contentOrientation, visualStyle, transcript } = await request.json()
     
-    const supabase = await createClient()
-
-    // Configurar Groq provider (compatible con OpenAI)
-    const groq = createOpenAI({
-      baseURL: "https://api.groq.com/openai/v1",
+    const supabase = await createClaseURL: "https://api.groq.com/openai/v1",
       apiKey: process.env.GROQ_API_KEY || "",
     })
 
