@@ -38,13 +38,11 @@ Transcripción:
 ${transcript}
 `
 
-    const openrouter = createOpenRouter({
-      apiKey: process.env.OPENROUTER_API_KEY || "",
+   apiKey: process.env.OPENROUTER_API_KEY || "",
     })
 
     const { text: outlineText } = await generateText({
-      model: openrouter("openai/gpt-4o"),
-      prompt: outlinePrompt,
+      model: openrouter("openai/gpt-4o"),      prompt: outlinePrompt,
    // Parsear el JSON del outline
     let outline
     try {
