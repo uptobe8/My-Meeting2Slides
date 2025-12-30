@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { createOpenRouter } from "@openrouter/ai-sdk-provider"
+import { createOpenAI } from "@ai-sdk/openai"
 import { generateText } from "ai"
 import { createClient } from "@/lib/supabase/server"
 
@@ -9,9 +9,10 @@ export async function POST(request: NextRequest) {
     
     const supabase = await createClient()
 
-    // Configurar OpenRouter provider
-    const openrouter = createOpenRouter({
-      apiKey: process.env.OPENROUTER_API_KEY || "",
+    // Configurar Groq provider (compatible con OpenAI)
+    const groq = createOpenAI({
+      baseURL: "https://api.groq.com/openai/v1",
+      apiKey: process.env.GROQ_API_KEY || "",
     })
 
     // Paso 1: Analizar el transcript y crear el outline
@@ -28,6 +29,7 @@ Para cada diapositiva incluye:
 - Puntos clave a mostrar
 
 Devuelve SOLO un JSON válido con este formato exacto, sin texto adicional:
+
 {
   "slides": [
     {
@@ -44,7 +46,7 @@ ${transcript}
 `
 
     const { text: outlineText } = await generateText({
-      model: openrouter("openai/gpt-4o"),
+      model: groq("llama-3.3-70b-versatile"),
       prompt: outlinePrompt,
     })
 
