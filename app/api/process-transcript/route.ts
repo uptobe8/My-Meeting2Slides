@@ -1,15 +1,13 @@
-import { type NextRequest, NextResponse } from "next/serv{ groq } from "@ai-sdk/groq"
-import { generateText } from "ai"
-import { createClient } from "@/lib/supabase/server"
+import { type NextRequest, NextResponse } from "next/server
+import { groq } from "@ai-sdk/groq"
+  import { generateText } from "ai"
+    import { createClient } from "@/lib/supabase/server"
 
 export async function POST(request: NextRequest) {
   try {
     const { presentationId, systemPrompt, contentOrientation, visualStyle, transcript } = await request.json()
     
-    const supabase = await createClaseURL: "https://api.groq.com/openai/v1",
-      apiKey: process.env.GROQ_API_KEY || "",
-    })
-
+const supabase = await createClient()
     // Paso 1: Analizar el transcript y crear el outline
     const outlinePrompt = `
 ${systemPrompt || "Eres un experto en crear presentaciones profesionales."}
