@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server"
+import { groq } from "@ai-sdk/groq"
+import { generateText } from "ai"
 
 function needEnv(name: string) {
   const v = process.env[name]
@@ -13,8 +15,6 @@ export async function POST(req: Request) {
     if (!presentationId || !transcript) {
       return NextResponse.json({ error: "presentationId y transcript requeridos" }, { status: 400 })
     }
-
-    const apiKey = needEnv('GEMINI_API_KEY')
 
     const prompt = `
 DEVUELVE SOLO JSON VÁLIDO. SIN MARKDOWN.
@@ -44,33 +44,12 @@ ${transcript}
 Genera una presentación de 8-10 slides.
 `
 
-    // Use Gemini REST API directly with POST method
-    const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + apiKey, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          contents: [{
-            parts: [{
-              text: prompt
-            }]
-          }],
-          generationConfig: {
-            temperature: 0.7,
-            maxOutputTokens: 4096,
-          }
-        })
-      })
-
-    if (!response.ok) {
-      const errorText = await response.text()
-      console.error('Gemini API Error:', errorText)
-      throw new Error(`Gemini API error: ${response.status} - ${errorText}`)
-    }
-
-    const data = await response.json()
-    const generatedText = data.candidates[0].content.parts[0].text
+    const { text: generatedText } = await generateText({
+      model: groq("llama-3.3-70b-versatile"),
+      prompt,
+      temperature: 0.7,
+      maxTokens: 4096,
+    })
 
     // Clean JSON response
     let cleanText = generatedText.trim()
@@ -85,7 +64,6 @@ Genera una presentación de 8-10 slides.
       presentationId,
       presentation
     })
-
   } catch (error: any) {
     console.error('Error en process-transcript:', error)
     return NextResponse.json({ error: error.message || 'Error procesando transcripción' }, { status: 500 })
