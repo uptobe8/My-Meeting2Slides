@@ -45,8 +45,7 @@ Genera una presentación de 8-10 slides.
 `
 
     // Use Gemini REST API directly (v1 stable API)
-    const response = await fetch('https://generativelanguage.googleapis.com/v1/models/gemini-1.5-pro:generateContent?key=' + apiKey, {
-      method: 'POST',
+    const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=' + apiKey, {      method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
