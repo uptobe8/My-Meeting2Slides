@@ -75,12 +75,11 @@ ${transcript}
           generationConfig: {
             temperature: 0.3,
           },
-        }));
-
+      })
+    );
     if (!geminiRes.ok) {
       const errText = await geminiRes.text();
-      t})
-    }); new Error(`Gemini API error ${geminiRes.status}: ${errText}`);
+        throw new Error(`Gemini API error ${geminiRes.status}: ${errText}`);
     }
 
     const geminiJson = await geminiRes.json();
